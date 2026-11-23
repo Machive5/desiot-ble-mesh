@@ -28,7 +28,7 @@
 #define ESP_BLE_MESH_VND_MODEL_OP_SEND   ESP_BLE_MESH_MODEL_OP_3(0x01, CID_ESP)
 
 /* Tombol BOOT built-in pada ESP32 (GPIO 0) */
-#define BUTTON_GPIO GPIO_NUM_0
+#define BUTTON_GPIO 14
 
 static const char* BLETAG = "BLE_MESH_APP";
 static uint8_t dev_uuid[16] = "CRV2N4";
@@ -157,7 +157,8 @@ static void config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
                 bind_state.model_app_bind.company_id = ESP_BLE_MESH_CID_NVAL;
                 esp_ble_mesh_config_client_set_state(&bind_common, &bind_state);
                 ESP_LOGI(BLETAG, "Mengirim Model Bind Generic OnOff Server ke Pompa (0x%04x)", pompa.unicast_addr);
-            } else if (target_addr == DHT.unicast_addr) {
+            }
+            else if (target_addr == DHT.unicast_addr) {
                 // Bind Vendor Model pada ESP DHT
                 bind_state.model_app_bind.model_id = ESP_BLE_MESH_VND_MODEL_ID_CLIENT;
                 bind_state.model_app_bind.company_id = CID_ESP;
@@ -172,7 +173,7 @@ static void config_client_cb(esp_ble_mesh_cfg_client_cb_event_t event,
 }
 
 static void generic_client_cb(esp_ble_mesh_generic_client_cb_event_t event,
-                              esp_ble_mesh_generic_client_cb_param_t *param)
+    esp_ble_mesh_generic_client_cb_param_t* param)
 {
     ESP_LOGI(BLETAG, "Generic client event: %d", event);
 }
@@ -191,7 +192,8 @@ static void dht_msg_cb(esp_ble_mesh_model_cb_event_t event, esp_ble_mesh_model_c
             if (data_len < sizeof(msg_str)) {
                 memcpy(msg_str, data, data_len);
                 ESP_LOGI(BLETAG, "Pesan Sensor: %s", msg_str);
-            } else {
+            }
+            else {
                 ESP_LOG_BUFFER_HEX(BLETAG, data, data_len);
             }
         }
@@ -208,6 +210,36 @@ static void provisioner_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov
     case ESP_BLE_MESH_PROVISIONER_PROV_ENABLE_COMP_EVT:
         ESP_LOGI(BLETAG, "Provisioner aktif berhasil, err_code: %d",
             param->provisioner_prov_enable_comp.err_code);
+        break;
+
+    case ESP_BLE_MESH_PROVISIONER_ADD_LOCAL_APP_KEY_COMP_EVT: {
+        ESP_LOGI(BLETAG, "Local AppKey berhasil ditambahkan, err_code: %d", param->provisioner_add_app_key_comp.err_code);
+        if (param->provisioner_add_app_key_comp.err_code == ESP_OK) {
+            /* 1. Bind local Generic OnOff Client model ke AppKey lokal */
+            esp_err_t err = esp_ble_mesh_provisioner_bind_app_key_to_local_model(
+                PROV_OWN_ADDR, APP_KEY_IDX,
+                ESP_BLE_MESH_MODEL_ID_GEN_ONOFF_CLI, ESP_BLE_MESH_CID_NVAL);
+            if (err != ESP_OK) {
+                ESP_LOGE(BLETAG, "Gagal bind OnOff Client lokal: %s", esp_err_to_name(err));
+            } else {
+                ESP_LOGI(BLETAG, "OnOff Client lokal berhasil di-bind ke AppKey!");
+            }
+
+            /* 2. Bind local Vendor Client model ke AppKey lokal */
+            err = esp_ble_mesh_provisioner_bind_app_key_to_local_model(
+                PROV_OWN_ADDR, APP_KEY_IDX,
+                ESP_BLE_MESH_VND_MODEL_ID_CLIENT, CID_ESP);
+            if (err != ESP_OK) {
+                ESP_LOGE(BLETAG, "Gagal bind Vendor Client lokal: %s", esp_err_to_name(err));
+            } else {
+                ESP_LOGI(BLETAG, "Vendor Client lokal berhasil di-bind ke AppKey!");
+            }
+        }
+        break;
+    }
+
+    case ESP_BLE_MESH_PROVISIONER_BIND_APP_KEY_TO_MODEL_COMP_EVT:
+        ESP_LOGI(BLETAG, "Provisioner bind local model selesai, err_code: %d", param->provisioner_bind_app_key_to_model_comp.err_code);
         break;
 
     case ESP_BLE_MESH_PROVISIONER_RECV_UNPROV_ADV_PKT_EVT: {
@@ -317,7 +349,7 @@ static void provisioner_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov
 }
 
 /* Thread / Task pembaca input Button untuk mengontrol Pompa */
-static void button_task(void *pvParameters)
+static void button_task(void* pvParameters)
 {
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << BUTTON_GPIO),
@@ -338,9 +370,10 @@ static void button_task(void *pvParameters)
                 if (pompa.unicast_addr != 0) {
                     pompa_state = !pompa_state;
                     ESP_LOGI(BLETAG, "[BUTTON] Tombol ditekan! Mengirim perintah Pompa -> %s (addr: 0x%04x)",
-                             pompa_state ? "ON" : "OFF", pompa.unicast_addr);
+                        pompa_state ? "ON" : "OFF", pompa.unicast_addr);
                     send_on_off_motor(pompa.unicast_addr, pompa_state);
-                } else {
+                }
+                else {
                     ESP_LOGW(BLETAG, "[BUTTON] Tombol ditekan, tetapi node POMPA belum terhubung / diprovision!");
                 }
 
@@ -386,11 +419,11 @@ void app_main(void)
     /* Inisialisasi BLE Mesh stack */
     ESP_ERROR_CHECK(esp_ble_mesh_init(&provision, &composition));
 
-    /* Daftarkan local AppKey pada Provisioner */
-    ESP_ERROR_CHECK(esp_ble_mesh_provisioner_add_local_app_key(app_key, ESP_BLE_MESH_KEY_PRIMARY, APP_KEY_IDX));
-
     /* Aktifkan Provisioner pada PB-ADV */
     ESP_ERROR_CHECK(esp_ble_mesh_provisioner_prov_enable(ESP_BLE_MESH_PROV_ADV));
+
+    /* Daftarkan local AppKey pada Provisioner (harus setelah prov_enable) */
+    ESP_ERROR_CHECK(esp_ble_mesh_provisioner_add_local_app_key(app_key, ESP_BLE_MESH_KEY_PRIMARY, APP_KEY_IDX));
 
     /* Buat thread/task terpisah untuk membaca input button */
     xTaskCreate(button_task, "button_task", 3072, NULL, 5, NULL);
